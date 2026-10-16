@@ -1,17 +1,47 @@
-# Habit Tracker
+# Two Cars
 
-Flutter habit tracker inspired by HelloHabit: monthly day strip, overdue tasks, daily habit cards with heatmaps, light/dark theme, and a shared add button.
+A Flutter arcade game for Android and the web. Control two cars independently,
+collect the circles, and avoid the squares.
 
-## Run
+## Controls
 
-Flutter is not required to be on PATH if you installed it at `%USERPROFILE%\flutter`.
+- Touch: tap one of the four road lanes to move that road's car.
+- Keyboard: `A` / `D` controls the left car; arrow keys control the right car.
+- Collecting a circle adds one point to that car.
+- Hitting a square ends the round.
+
+## Run in VS Code on Android
+
+Install Flutter and the VS Code Flutter extension, then open this folder. If the
+`android` and `web` folders are not present yet, generate them once:
 
 ```powershell
-$env:Path = "$env:USERPROFILE\flutter\bin;" + $env:Path
-$env:FLUTTER_STORAGE_BASE_URL = "https://storage.flutter-io.cn"
-$env:PUB_HOSTED_URL = "https://pub.flutter-io.cn"
+flutter create --platforms=android,web .
 flutter pub get
+flutter doctor
+```
+
+Start an Android emulator (or connect a phone with USB debugging), select it in
+the VS Code status bar, and press `F5`. You can also run:
+
+```powershell
 flutter run
 ```
 
-On Android, use an emulator or a USB-connected device with USB debugging enabled.
+## Run locally with Docker
+
+Docker serves the web build through nginx:
+
+```powershell
+docker build -t two-cars .
+docker run --rm -p 8080:80 two-cars
+```
+
+Open <http://localhost:8080>.
+
+## Test
+
+```powershell
+flutter test
+flutter analyze
+```
