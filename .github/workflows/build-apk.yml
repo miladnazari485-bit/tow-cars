@@ -1,0 +1,43 @@
+name: Build APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build release APK
+        run: flutter build apk --release
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: two-cars-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
+
+      - name: Publish downloadable release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.0
+          name: Two Cars v1.0.0
+          body: Install Two Cars on Android. Enable Install unknown apps if prompted, then open this APK.
+          files: build/app/outputs/flutter-apk/app-release.apk
+          make_latest: true
