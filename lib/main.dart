@@ -2,8 +2,21 @@ import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
-void main() => runApp(const TwoCarsApp());
+import 'collision.dart';
+
+const Color forest = Color(0xff1b8c4a);
+const Color leaf = Color(0xff7bd36a);
+const Color orange = Color(0xffff7a18);
+const Color amber = Color(0xffffc15a);
+const Color night = Color(0xff12140f);
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+  runApp(const TwoCarsApp());
+}
 
 class TwoCarsApp extends StatelessWidget {
   const TwoCarsApp({super.key});
@@ -15,7 +28,12 @@ class TwoCarsApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         brightness: Brightness.dark,
-        colorSchemeSeed: const Color(0xffef476f),
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: orange,
+          brightness: Brightness.dark,
+          primary: orange,
+          secondary: forest,
+        ),
         fontFamily: 'sans-serif',
       ),
       home: const GameScreen(),
@@ -48,8 +66,8 @@ class GameScreen extends StatefulWidget {
 
 class _GameScreenState extends State<GameScreen>
     with SingleTickerProviderStateMixin {
-  static const double _carY = 0.82;
-  static const double _fallSpeed = 0.34;
+  static const _bestKey = 'two_cars_best_score';
+  static const _fallSpeed = 0.32;
 
   final Random _random = Random();
   final FocusNode _focusNode = FocusNode();
@@ -64,6 +82,9 @@ class _GameScreenState extends State<GameScreen>
   int _rightTrack = 1;
   int _leftScore = 0;
   int _rightScore = 0;
+  int _bestScore = 0;
+
+  int get _score => _leftScore + _rightScore;
 
   @override
   void initState() {
@@ -73,6 +94,20 @@ class _GameScreenState extends State<GameScreen>
       duration: const Duration(days: 1),
     )..addListener(_tick);
     _focusNode.requestFocus();
+    _loadBest();
+  }
+
+  Future<void> _loadBest() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() => _bestScore = prefs.getInt(_bestKey) ?? 0);
+  }
+
+  Future<void> _saveBest() async {
+    if (_score <= _bestScore) return;
+    _bestScore = _score;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_bestKey, _bestScore);
   }
 
   @override
@@ -114,40 +149,50 @@ class _GameScreenState extends State<GameScreen>
     _lastElapsed = elapsed;
     if (dt <= 0) return;
 
+    var crashed = false;
     setState(() {
       _leftSpawnTimer -= dt;
       _rightSpawnTimer -= dt;
       if (_leftSpawnTimer <= 0) {
         _spawnObject(0);
-        _leftSpawnTimer = 0.8 + _random.nextDouble() * 0.55;
+        _leftSpawnTimer = 0.85 + _random.nextDouble() * 0.5;
       }
       if (_rightSpawnTimer <= 0) {
         _spawnObject(1);
-        _rightSpawnTimer = 0.8 + _random.nextDouble() * 0.55;
+        _rightSpawnTimer = 0.85 + _random.nextDouble() * 0.5;
       }
 
       for (final object in _objects) {
+        final previousY = object.y;
         object.y += _fallSpeed * dt;
+        if (object.collected) continue;
         final carTrack = object.road == 0 ? _leftTrack : _rightTrack;
-        if (!object.collected &&
-            object.track == carTrack &&
-            (object.y - _carY).abs() < 0.065) {
-          object.collected = true;
-          if (object.isCircle) {
-            if (object.road == 0) {
-              _leftScore++;
-            } else {
-              _rightScore++;
-            }
+        if (!objectHitsCar(
+          objectY: object.y,
+          previousY: previousY,
+          objectTrack: object.track,
+          carTrack: carTrack,
+        )) {
+          continue;
+        }
+        object.collected = true;
+        if (object.isCircle) {
+          if (object.road == 0) {
+            _leftScore++;
           } else {
-            _endGame();
-            break;
+            _rightScore++;
           }
+        } else {
+          crashed = true;
+          break;
         }
       }
       _objects.removeWhere(
-        (object) => object.collected || object.y > 1.08,
+        (object) => object.collected || object.y > 1.12,
       );
+      if (crashed) {
+        _endGame();
+      }
     });
   }
 
@@ -156,7 +201,7 @@ class _GameScreenState extends State<GameScreen>
       FallingObject(
         road: road,
         track: _random.nextInt(2),
-        isCircle: _random.nextDouble() < 0.62,
+        isCircle: _random.nextDouble() < 0.68,
       ),
     );
   }
@@ -164,15 +209,16 @@ class _GameScreenState extends State<GameScreen>
   void _endGame() {
     _status = GameStatus.gameOver;
     _clock.stop();
+    _saveBest();
   }
 
-  void _selectTrack(int road, int track) {
+  void _toggleCar(int road) {
     if (_status != GameStatus.running) return;
     setState(() {
       if (road == 0) {
-        _leftTrack = track;
+        _leftTrack = toggleTrack(_leftTrack);
       } else {
-        _rightTrack = track;
+        _rightTrack = toggleTrack(_rightTrack);
       }
     });
   }
@@ -183,16 +229,12 @@ class _GameScreenState extends State<GameScreen>
     }
     switch (event.logicalKey) {
       case LogicalKeyboardKey.keyA:
-        _selectTrack(0, 0);
-        return KeyEventResult.handled;
       case LogicalKeyboardKey.keyD:
-        _selectTrack(0, 1);
+        _toggleCar(0);
         return KeyEventResult.handled;
       case LogicalKeyboardKey.arrowLeft:
-        _selectTrack(1, 0);
-        return KeyEventResult.handled;
       case LogicalKeyboardKey.arrowRight:
-        _selectTrack(1, 1);
+        _toggleCar(1);
         return KeyEventResult.handled;
       case LogicalKeyboardKey.space:
       case LogicalKeyboardKey.enter:
@@ -203,24 +245,25 @@ class _GameScreenState extends State<GameScreen>
     }
   }
 
-  void _handleTap(TapDownDetails details, double width) {
-    final quarter =
-        (details.localPosition.dx / (width / 4)).floor().clamp(0, 3);
-    _selectTrack(quarter < 2 ? 0 : 1, quarter.isEven ? 0 : 1);
+  void _onPointerDown(PointerDownEvent event, double width) {
+    if (_status != GameStatus.running) return;
+    _toggleCar(sideFromX(event.localPosition.dx, width));
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: night,
       body: Focus(
         autofocus: true,
         focusNode: _focusNode,
         onKeyEvent: _handleKey,
         child: LayoutBuilder(
           builder: (context, constraints) {
-            return GestureDetector(
+            return Listener(
               behavior: HitTestBehavior.opaque,
-              onTapDown: (details) => _handleTap(details, constraints.maxWidth),
+              onPointerDown: (event) =>
+                  _onPointerDown(event, constraints.maxWidth),
               child: Stack(
                 fit: StackFit.expand,
                 children: [
@@ -231,43 +274,16 @@ class _GameScreenState extends State<GameScreen>
                       rightTrack: _rightTrack,
                       leftScore: _leftScore,
                       rightScore: _rightScore,
-                    ),
-                  ),
-                  Positioned(
-                    left: 0,
-                    right: 0,
-                    top: MediaQuery.paddingOf(context).top + 14,
-                    child: const Center(
-                      child: Text(
-                        'TWO CARS',
-                        style: TextStyle(
-                          fontSize: 22,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: 4,
-                        ),
-                      ),
+                      bestScore: _bestScore,
+                      showHints: _status == GameStatus.running,
                     ),
                   ),
                   if (_status != GameStatus.running)
                     _GameOverlay(
                       isGameOver: _status == GameStatus.gameOver,
-                      score: _leftScore + _rightScore,
+                      score: _score,
+                      bestScore: _bestScore,
                       onStart: _startGame,
-                    ),
-                  if (_status == GameStatus.running)
-                    const Positioned(
-                      left: 0,
-                      right: 0,
-                      bottom: 18,
-                      child: Text(
-                        'A / D                         ← / →\n'
-                        'Tap a lane to steer',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: Colors.white54,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
                     ),
                 ],
               ),
@@ -283,63 +299,80 @@ class _GameOverlay extends StatelessWidget {
   const _GameOverlay({
     required this.isGameOver,
     required this.score,
+    required this.bestScore,
     required this.onStart,
   });
 
   final bool isGameOver;
   final int score;
+  final int bestScore;
   final VoidCallback onStart;
 
   @override
   Widget build(BuildContext context) {
     return ColoredBox(
-      color: const Color(0xcc10121a),
-      child: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(28),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                isGameOver ? Icons.warning_rounded : Icons.sports_esports,
-                size: 72,
-                color: isGameOver
-                    ? const Color(0xffffd166)
-                    : const Color(0xff06d6a0),
-              ),
-              const SizedBox(height: 18),
-              Text(
-                isGameOver ? 'CRASH!' : 'READY?',
-                style: const TextStyle(
-                  fontSize: 38,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 3,
-                ),
-              ),
-              const SizedBox(height: 10),
-              Text(
-                isGameOver
-                    ? 'Total score: $score'
-                    : 'Collect circles. Avoid squares.\n'
-                        'Control both cars at the same time.',
-                textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 17, height: 1.5),
-              ),
-              const SizedBox(height: 28),
-              FilledButton.icon(
-                onPressed: onStart,
-                icon: const Icon(Icons.play_arrow_rounded),
-                label: Text(isGameOver ? 'PLAY AGAIN' : 'START GAME'),
-                style: FilledButton.styleFrom(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 28, vertical: 16),
-                  textStyle: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w800,
+      color: const Color(0xdd12140f),
+      child: SafeArea(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(28),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  'TWO CARS',
+                  style: TextStyle(
+                    fontSize: 28,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 5,
+                    color: amber,
                   ),
                 ),
-              ),
-            ],
+                const SizedBox(height: 18),
+                Icon(
+                  isGameOver ? Icons.warning_rounded : Icons.sports_esports,
+                  size: 68,
+                  color: isGameOver ? orange : leaf,
+                ),
+                const SizedBox(height: 14),
+                Text(
+                  isGameOver ? 'CRASH!' : 'READY?',
+                  style: const TextStyle(
+                    fontSize: 36,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 3,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  isGameOver
+                      ? 'Score $score   •   Best $bestScore'
+                      : 'Left thumb moves the green car.\n'
+                          'Right thumb moves the orange car.\n'
+                          'Grab circles. Skip squares.',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 16, height: 1.5),
+                ),
+                const SizedBox(height: 28),
+                FilledButton.icon(
+                  onPressed: onStart,
+                  icon: const Icon(Icons.play_arrow_rounded),
+                  label: Text(isGameOver ? 'PLAY AGAIN' : 'START GAME'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: orange,
+                    foregroundColor: night,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 28,
+                      vertical: 16,
+                    ),
+                    textStyle: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -354,6 +387,8 @@ class GamePainter extends CustomPainter {
     required this.rightTrack,
     required this.leftScore,
     required this.rightScore,
+    required this.bestScore,
+    required this.showHints,
   });
 
   final List<FallingObject> objects;
@@ -361,24 +396,19 @@ class GamePainter extends CustomPainter {
   final int rightTrack;
   final int leftScore;
   final int rightScore;
-
-  static const Color leftColor = Color(0xffef476f);
-  static const Color rightColor = Color(0xff118ab2);
+  final int bestScore;
+  final bool showHints;
 
   @override
   void paint(Canvas canvas, Size size) {
+    canvas.drawRect(Offset.zero & size, Paint()..color = night);
     canvas.drawRect(
-      Offset.zero & size,
-      Paint()..color = const Color(0xff10121a),
+      Rect.fromLTWH(0, 0, size.width / 2, size.height),
+      Paint()..color = const Color(0xff172317),
     );
-
-    final roadPaint = Paint()..color = const Color(0xff191c27);
-    canvas.drawRect(
-        Rect.fromLTWH(0, 0, size.width / 2, size.height), roadPaint);
-    roadPaint.color = const Color(0xff151924);
     canvas.drawRect(
       Rect.fromLTWH(size.width / 2, 0, size.width / 2, size.height),
-      roadPaint,
+      Paint()..color = const Color(0xff24180f),
     );
 
     _drawRoadLines(canvas, size);
@@ -387,42 +417,65 @@ class GamePainter extends CustomPainter {
     for (final object in objects) {
       _drawObject(canvas, size, object);
     }
-    _drawCar(canvas, size, 0, leftTrack, leftColor);
-    _drawCar(canvas, size, 1, rightTrack, rightColor);
+    _drawCar(canvas, size, 0, leftTrack, forest);
+    _drawCar(canvas, size, 1, rightTrack, orange);
+
+    if (showHints) {
+      _drawThumbPad(canvas, size, true);
+      _drawThumbPad(canvas, size, false);
+    }
+  }
+
+  void _drawThumbPad(Canvas canvas, Size size, bool left) {
+    final rect = RRect.fromRectAndRadius(
+      Rect.fromCenter(
+        center: Offset(left ? size.width * 0.25 : size.width * 0.75, size.height - 46),
+        width: size.width * 0.38,
+        height: 56,
+      ),
+      const Radius.circular(28),
+    );
+    canvas.drawRRect(
+      rect,
+      Paint()..color = (left ? forest : orange).withValues(alpha: 0.22),
+    );
+    _drawText(
+      canvas,
+      left ? 'TAP LEFT' : 'TAP RIGHT',
+      Offset(left ? size.width * 0.25 : size.width * 0.75, size.height - 56),
+      Colors.white70,
+      13,
+    );
   }
 
   void _drawRoadLines(Canvas canvas, Size size) {
-    final edgePaint = Paint()
-      ..color = Colors.white12
-      ..strokeWidth = 2;
+    final paint = Paint()
+      ..strokeWidth = 3
+      ..color = amber.withValues(alpha: 0.55);
     canvas.drawLine(
       Offset(size.width / 2, 0),
       Offset(size.width / 2, size.height),
-      edgePaint..color = Colors.white30,
+      paint,
     );
-
-    edgePaint.color = Colors.white12;
+    paint
+      ..strokeWidth = 2
+      ..color = Colors.white24;
     for (final x in [size.width / 4, size.width * 3 / 4]) {
-      for (double y = 0; y < size.height; y += 42) {
-        canvas.drawLine(Offset(x, y), Offset(x, y + 22), edgePaint);
+      for (double y = 0; y < size.height; y += 40) {
+        canvas.drawLine(Offset(x, y), Offset(x, y + 18), paint);
       }
     }
   }
 
   void _drawScores(Canvas canvas, Size size) {
+    _drawText(canvas, '$leftScore', Offset(size.width * 0.14, 52), leaf, 34);
+    _drawText(canvas, '$rightScore', Offset(size.width * 0.86, 52), amber, 34);
     _drawText(
       canvas,
-      '$leftScore',
-      Offset(size.width * 0.13, 58),
-      leftColor,
-      32,
-    );
-    _drawText(
-      canvas,
-      '$rightScore',
-      Offset(size.width * 0.87, 58),
-      rightColor,
-      32,
+      'BEST $bestScore',
+      Offset(size.width / 2, 52),
+      Colors.white70,
+      16,
     );
   }
 
@@ -431,29 +484,23 @@ class GamePainter extends CustomPainter {
       _trackX(size, object.road, object.track),
       object.y * size.height,
     );
-    final radius = min(size.width / 18, 25.0);
-    final color = object.road == 0 ? leftColor : rightColor;
+    final radius = min(size.width / 16, 28.0);
+    final color = object.road == 0 ? leaf : amber;
     final paint = Paint()..color = color;
     if (object.isCircle) {
       canvas.drawCircle(center, radius, paint);
-      canvas.drawCircle(
-        center,
-        radius * 0.48,
-        Paint()..color = const Color(0xff10121a),
-      );
     } else {
-      canvas.save();
-      canvas.translate(center.dx, center.dy);
-      canvas.rotate(pi / 4);
-      canvas.drawRect(
-        Rect.fromCenter(
-          center: Offset.zero,
-          width: radius * 1.55,
-          height: radius * 1.55,
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromCenter(
+            center: center,
+            width: radius * 1.7,
+            height: radius * 1.7,
+          ),
+          const Radius.circular(6),
         ),
         paint,
       );
-      canvas.restore();
     }
   }
 
@@ -464,36 +511,24 @@ class GamePainter extends CustomPainter {
     int track,
     Color color,
   ) {
-    final center = Offset(_trackX(size, road, track), 0.82 * size.height);
-    final width = min(size.width / 9, 44.0);
-    final height = width * 1.65;
+    final center = Offset(_trackX(size, road, track), carY * size.height);
+    final width = min(size.width / 8.2, 50.0);
+    final height = width * 1.55;
     final body = RRect.fromRectAndRadius(
       Rect.fromCenter(center: center, width: width, height: height),
-      Radius.circular(width * 0.26),
+      Radius.circular(width * 0.28),
     );
     canvas.drawRRect(body, Paint()..color = color);
     canvas.drawRRect(
       RRect.fromRectAndRadius(
         Rect.fromCenter(
-          center: center.translate(0, -height * 0.12),
-          width: width * 0.66,
-          height: height * 0.42,
+          center: center.translate(0, -height * 0.1),
+          width: width * 0.62,
+          height: height * 0.38,
         ),
         Radius.circular(width * 0.12),
       ),
-      Paint()..color = const Color(0xffd9f0ff),
-    );
-
-    final lightPaint = Paint()..color = const Color(0xfffff3b0);
-    canvas.drawCircle(
-      center.translate(-width * 0.28, -height * 0.39),
-      width * 0.07,
-      lightPaint,
-    );
-    canvas.drawCircle(
-      center.translate(width * 0.28, -height * 0.39),
-      width * 0.07,
-      lightPaint,
+      Paint()..color = const Color(0xfff4ffe8),
     );
   }
 

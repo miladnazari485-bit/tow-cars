@@ -1,17 +1,35 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:two_cars/main.dart';
+import 'package:two_cars/collision.dart';
 
 void main() {
-  testWidgets('starts a new two-car game', (tester) async {
-    await tester.pumpWidget(const TwoCarsApp());
+  test('collects a circle that passes through the car in one frame', () {
+    expect(
+      objectHitsCar(
+        previousY: 0.70,
+        objectY: 0.90,
+        objectTrack: 1,
+        carTrack: 1,
+      ),
+      isTrue,
+    );
+  });
 
-    expect(find.text('READY?'), findsOneWidget);
-    expect(find.text('START GAME'), findsOneWidget);
+  test('does not collect a circle in the other lane', () {
+    expect(
+      objectHitsCar(
+        previousY: 0.80,
+        objectY: 0.84,
+        objectTrack: 0,
+        carTrack: 1,
+      ),
+      isFalse,
+    );
+  });
 
-    await tester.tap(find.text('START GAME'));
-    await tester.pump();
-
-    expect(find.text('READY?'), findsNothing);
-    expect(find.textContaining('Tap a lane'), findsOneWidget);
+  test('left and right taps map to the two cars', () {
+    expect(sideFromX(10, 400), 0);
+    expect(sideFromX(300, 400), 1);
+    expect(toggleTrack(0), 1);
+    expect(toggleTrack(1), 0);
   });
 }
