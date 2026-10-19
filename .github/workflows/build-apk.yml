@@ -36,8 +36,8 @@ jobs:
       - name: Publish downloadable release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.1.0
-          name: Two Cars v1.1.0
+          tag_name: v1.1.1
+          name: Two Cars v1.1.1
           body: |
             Two-thumb controls: tap the left half to move the green car, tap the right half to move the orange car.
             Android may still ask once to allow installing this app because it is not from Play Store. Choose Install.
